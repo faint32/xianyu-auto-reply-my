@@ -24,6 +24,7 @@ from loguru import logger
 from common.services.captcha.concurrency import concurrency_manager, account_browser_lock_manager
 from common.services.captcha.drissionpage_tracks import generate_tracks
 from common.services.captcha.drissionpage_motion import calculate_slide_distance, execute_tracks
+from common.services.captcha.strategy_stats import strategy_stats
 from common.utils.browser_utils import ensure_playwright_browser_path, get_chromium_executable_path
 from common.utils.xianyu_utils import trans_cookies
 
@@ -356,6 +357,10 @@ class DrissionPageSliderService:
                                 f"【{self.pure_user_id}】DrissionPage 兜底成功，耗时 {duration:.2f}s，"
                                 f"滑动 {self.slide_attempt} 次"
                             )
+                            try:
+                                strategy_stats.record_drissionpage_fallback(True)
+                            except Exception as stat_e:
+                                logger.warning(f"【{self.pure_user_id}】兜底成功统计记录失败: {stat_e}")
                             return True, cookies
                         # 标题已非拦截页但仍未拿到 x5sec：尚未真正通过，继续重试
                         logger.warning(
@@ -370,6 +375,10 @@ class DrissionPageSliderService:
                     logger.error(f"【{self.pure_user_id}】DrissionPage 第 {attempt + 1} 次异常: {e}")
 
             logger.error(f"【{self.pure_user_id}】DrissionPage 兜底最终失败")
+            try:
+                strategy_stats.record_drissionpage_fallback(False)
+            except Exception as stat_e:
+                logger.warning(f"【{self.pure_user_id}】兜底失败统计记录失败: {stat_e}")
             return False, None
         finally:
             self.close()

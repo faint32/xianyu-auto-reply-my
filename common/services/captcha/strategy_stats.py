@@ -38,6 +38,8 @@ class RetryStrategyStats:
             'attempt_2_cautious': {'total': 0, 'success': 0, 'fail': 0},
             'attempt_3_fast': {'total': 0, 'success': 0, 'fail': 0},
             'attempt_3_slow': {'total': 0, 'success': 0, 'fail': 0},
+            # DrissionPage 兜底引擎独立统计维度（不与主引擎的 attempt_* 混淆）
+            'drissionpage_fallback': {'total': 0, 'success': 0, 'fail': 0},
         }
         self.stats_file = 'logs/trajectory_history/strategy_stats.json'
         self._load_stats()
@@ -84,6 +86,29 @@ class RetryStrategyStats:
                 self.strategy_stats[key]['fail'] += 1
 
             # 每次记录后保存
+            self._save_stats()
+
+    def record_drissionpage_fallback(self, success: bool):
+        """记录一次 DrissionPage 兜底引擎的结果（独立维度）。
+
+        主引擎的 record_attempt 只统计 Playwright 三段策略，兜底成功/失败
+        此前完全不落统计。此方法把兜底整体成功率单独记到
+        'drissionpage_fallback' 维度，便于评估兜底真实效果。
+
+        Args:
+            success: 兜底是否最终拿到 x5sec 放行
+        """
+        with self.stats_lock:
+            key = 'drissionpage_fallback'
+            if key not in self.strategy_stats:
+                self.strategy_stats[key] = {'total': 0, 'success': 0, 'fail': 0}
+
+            self.strategy_stats[key]['total'] += 1
+            if success:
+                self.strategy_stats[key]['success'] += 1
+            else:
+                self.strategy_stats[key]['fail'] += 1
+
             self._save_stats()
 
     def get_stats_summary(self) -> Dict[str, Dict[str, Any]]:

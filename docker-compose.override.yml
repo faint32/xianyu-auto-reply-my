@@ -1,0 +1,35 @@
+# 安全覆盖：
+# 1) 后端三服务(backend-web/websocket/scheduler)不再映射宿主端口——
+#    它们只在 compose 网络内被 frontend 用容器名访问，无需暴露到宿主，
+#    这样也彻底避免 docker 宿主端口分配的偶发 "address already in use"。
+#    如需本机调试，用 docker exec 或临时 --service-ports。
+# 2) 仅 frontend 暴露到 127.0.0.1:9000，公网通过已有 nginx-proxy-manager
+#    反代 9000 + HTTPS + Basic Auth。
+# 3) 放宽健康检查启动期：首次要建大量数据表，默认 60s 不够，误判 unhealthy
+#    会触发反复重启、重启后脱离网络导致容器名解析失败(Errno -3)。
+services:
+  backend-web:
+    ports: !override []
+    restart: unless-stopped
+    healthcheck:
+      start_period: 240s
+      interval: 15s
+      timeout: 10s
+      retries: 8
+  websocket:
+    ports: !override []
+    healthcheck:
+      start_period: 240s
+      interval: 15s
+      timeout: 10s
+      retries: 8
+  scheduler:
+    ports: !override []
+    healthcheck:
+      start_period: 240s
+      interval: 15s
+      timeout: 10s
+      retries: 8
+  frontend:
+    ports: !override
+      - "127.0.0.1:9000:80"
