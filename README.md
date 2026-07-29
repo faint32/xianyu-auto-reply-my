@@ -6,9 +6,7 @@
 
 > 本仓库不是上游项目的官方版本。上游功能、部署方式和平台接口可能继续变化，本版本的定制功能以当前仓库代码和本文档为准。
 
-## 许可证与来源声明（License & Attribution）
-
-本项目基于 [`Toker111/xianyu-auto-reply-custom`](https://github.com/Toker111/xianyu-auto-reply-custom)（其本身又源自 [`zhinianboke/xianyu-auto-reply`](https://github.com/zhinianboke/xianyu-auto-reply)）二次开发，遵循 **GNU AGPL-3.0** 许可证。
+本项目基于 [`Toker111/xianyu-auto-reply-custom`](https://github.com/Toker111/xianyu-auto-reply-custom)（其本身又源自 [`zhinianboke/xianyu-auto-reply`](https://github.com/zhinianboke/xianyu-auto-reply)）二次开发。
 
 - 完整许可证见根目录 [`LICENSE`](./LICENSE)，原作者版权与许可证条款均予保留。
 - 依据 AGPL-3.0：任何以网络服务形式对外提供本软件（修改版）时，须向使用者提供对应的完整源码。
@@ -22,11 +20,6 @@
 - **跨机迁移脚本**：`migrate_export.sh` / `migrate_import.sh`，支持仅配置或连数据卷迁移。
 
 > ⚠️ 部署前务必 `cp .env.example .env` 并填入自己的强随机密码，切勿使用上游默认密码。真实 `.env` 已被 `.gitignore` 忽略，不会进入版本库。
-
-
-
-学习交流群，问题反馈群
-<img width="326" height="418" alt="image" src="https://github.com/user-attachments/assets/320a82a3-939d-4ab5-b5e3-ec8a9afe3f10" />
 
 
 ## 当前版本重点
