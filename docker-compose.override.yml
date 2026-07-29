@@ -11,6 +11,9 @@ services:
   backend-web:
     ports: !override []
     restart: unless-stopped
+    # S1 修复：透传外部 /send 接口鉴权密钥（从 .env 读取，无则接口 fail-closed 拒绝）
+    environment:
+      - MESSAGE_API_SECRET=${MESSAGE_API_SECRET:-}
     healthcheck:
       start_period: 240s
       interval: 15s
