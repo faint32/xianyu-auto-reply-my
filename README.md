@@ -159,6 +159,145 @@ git diff --cached
 
 即使仓库是私有仓库，也不要提交真实凭据。如果密钥曾经意外提交，应立即在对应平台撤销并重新生成，单纯删除最新文件并不能清除 Git 历史。
 
+## Linux VPS Docker 部署（推荐）
+
+以下是本定制版在 Linux VPS 上的推荐生产部署方式。它使用 Docker Compose 启动完整
+6 容器栈，并通过 `docker-compose.override.yml` 保持后端服务仅在 Docker 内部网络可达。
+
+### 环境要求
+
+- Linux VPS，建议至少 2.5 GB 可用内存、5 GB 可用磁盘；
+- Docker Engine 与 Docker Compose v2；
+- Git；
+- 若需要公网访问：已部署 nginx-proxy-manager（或其他反向代理）和可解析到 VPS 的域名。
+
+### 1. 拉取代码并创建真实配置
+
+```bash
+git clone https://github.com/faint32/xianyu-auto-reply-my.git /root/xianyu
+cd /root/xianyu
+cp .env.example .env
+chmod 600 .env
+```
+
+编辑 `.env`，至少完成以下项目：
+
+```dotenv
+# 使用官方镜像，不使用上游默认的定制私仓镜像
+MYSQL_IMAGE=mysql:8.0
+REDIS_IMAGE=redis:7-alpine
+
+# 全部替换为强随机值（示例命令：openssl rand -hex 24）
+MYSQL_ROOT_PASSWORD=CHANGE_ME
+MYSQL_PASSWORD=CHANGE_ME
+REDIS_PASSWORD=CHANGE_ME
+EXTERNAL_API_KEY=CHANGE_ME
+
+# S1 安全修复：外部 /api/v1/messages/send 接口的唯一鉴权密钥。
+# 不配置时接口会 fail-closed 拒绝请求；生成：openssl rand -hex 32
+MESSAGE_API_SECRET=CHANGE_ME
+
+# 安全基线：关闭上游远程广告/公告与自动任务，先人工内测
+ENABLE_REMOTE_ADS=false
+ENABLE_REMOTE_ANNOUNCEMENTS=false
+ENABLE_REMOTE_POPUP_ANNOUNCEMENTS=false
+AUTO_START_CRAWL_JOBS=false
+AUTO_START_WEBSOCKET=false
+SQL_ECHO=false
+```
+
+> **不要**使用 `docker-compose.yml` 中的默认密码或默认上游镜像。`.env`、`.env.bak.*`
+> 和本地安全审核文档都已被 `.gitignore` 忽略，禁止手工强制提交。
+
+### 2. 检查安全覆盖配置
+
+仓库自带的 `docker-compose.override.yml` 应保持以下安全特性：
+
+- `backend-web`、`websocket`、`scheduler` **不映射宿主机端口**；
+- 仅 `frontend` 映射 `127.0.0.1:9000:80`，不直接裸露公网；
+- backend/websocket/scheduler 健康检查 `start_period` 至少 180–240 秒；
+- `backend-web.environment` 必须透传：
+  `MESSAGE_API_SECRET=${MESSAGE_API_SECRET:-}`。
+
+启动前验证 Compose 已正确读取真实 `.env`（不要把输出发到公开场所）：
+
+```bash
+docker compose config >/tmp/xianyu-compose-resolved.yml
+# 只检查变量存在，不回显完整值
+grep 'MESSAGE_API_SECRET' /tmp/xianyu-compose-resolved.yml | sed -E 's/(.{30}).*/\1***REDACTED***/'
+```
+
+### 3. 构建并启动
+
+```bash
+cd /root/xianyu
+docker compose up -d --build
+docker compose ps
+```
+
+首次构建会下载 Python 依赖和 Playwright Chromium，通常需要数分钟。`backend-web`
+首次还会建立大量数据表，可能需要 1–2 分钟才转为 `healthy`。
+
+```bash
+# 等待 backend-web 健康
+after=0
+while [ "$after" -lt 18 ]; do
+  docker inspect xianyu-backend-web --format '{{.State.Health.Status}}'
+  sleep 10
+  after=$((after + 1))
+done
+
+# 后端健康检查（在容器内部，后端不暴露宿主端口）
+docker exec xianyu-backend-web curl -sS http://localhost:8089/health
+# 应包含："database":"connected"
+
+# 前端本机检查
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:9000/
+```
+
+### 4. nginx-proxy-manager（可选公网反代）
+
+若用 Nginx Proxy Manager（NPM）对外暴露前端：
+
+1. 让 NPM 与闲鱼容器处于同一个 Docker 网络：
+   ```bash
+   docker network connect xianyu_xianyu-network npm
+   docker exec npm curl -sS -o /dev/null -w '%{http_code}\n' http://xianyu-frontend:80/
+   # 应返回 200
+   ```
+2. NPM 新建 Proxy Host：
+   - Forward Hostname：`xianyu-frontend`
+   - Forward Port：`80`
+   - Scheme：`http`
+   - 开启 Websockets Support、Force SSL、HTTP/2；
+   - 建议同时配置 Access List（Basic Auth）作为后台登录外的第二层防护。
+3. 如果域名走 Cloudflare 橙云，申请 Let's Encrypt HTTP 证书失败时，临时改为灰云（仅 DNS），
+   证书签发成功后再切回橙云。
+
+### 5. 更新与重建
+
+```bash
+cd /root/xianyu
+git pull --ff-only
+# 代码改动只有 backend-web 时可只重建它
+docker compose up -d --build backend-web
+# 变动 common/、compose 或多个服务时重建全栈
+docker compose up -d --build
+```
+
+更新后重新跑第 3 步健康检查；尤其确认 `MESSAGE_API_SECRET` 仍被 override 注入。
+
+### 常见启动问题
+
+- **backend-web 首启反复 unhealthy / mysql 名称解析失败**：健康检查等待不足导致重启风暴；
+  确认 override 的 `start_period: 240s`，必要时先 `docker compose up -d mysql redis` 等其 healthy，
+  再执行 `docker compose up -d`。
+- **`address already in use`（8089/8090/8091）**：后端不应映射宿主机端口；确认 override 中
+  对三个后端服务使用 `ports: !override []`。
+- **frontend 显示 unhealthy 但反代/`127.0.0.1:9000` 返回 200**：上游 healthcheck 使用
+  `localhost` 可能解析到 IPv6 `::1`，而 nginx 只监听 IPv4；属于健康检查误报，实际 HTTP 200
+  即代表前端正常。
+
 ## 本地开发环境
 
 当前定制版推荐以下源码开发方式：
